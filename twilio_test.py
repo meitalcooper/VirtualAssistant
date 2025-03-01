@@ -19,7 +19,7 @@ try:
     print("Initiating call...")
     # Simplified call creation matching the successful call configuration
     call = client.calls.create(
-        to="+972543369153",
+        to="{YOUR_NUMBER}",
         from_="+16205091768",
         url="https://4243-89-138-72-52.ngrok-free.app/ivr/vpn_access_menu"
     )
