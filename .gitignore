@@ -1,1 +1,4 @@
 private_keys/
+.venv/
+venv/
+*.dylib
