@@ -58,7 +58,7 @@ flask run
 ### 📊 IVR Workflow Diagram
 Below is the IVR system workflow illustrating the authentication and troubleshooting process:
 
-![IVR Workflow](IVR-workflow.png)
+*The original flowchart has been removed to maintain the privacy and confidentiality of internal company processes.*
 
 1. **System Checks for Outages:** If an outage is detected, the caller is notified and the call ends.
 2. **User Calls & Reaches Virtual Assistant:** The IVR system starts troubleshooting using a simple dial pad.
