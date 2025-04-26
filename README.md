@@ -7,9 +7,9 @@ VirtualAssistant is an interactive **voice-based assistant** designed to handle 
 - **IVR System with Twilio:** Handles voice calls, authentication, and troubleshooting flows.
 - **Whisper Speech Recognition:** Converts voice recordings to text for verification.
 - **User Authentication:** Verifies identity using usernames, manager names, and hire dates.
-- **Soundex Phonetic & Fuzzy Matching:** New phonetic layer (`utils.is_name_match`) catches variations in spoken names (e.g., “Radka Mikolavka” vs. “Radka Mikalavka”).
+- **Soundex Phonetic & Fuzzy Matching:** New phonetic layer (`utils.is_name_match`) catches variations in spoken names.
 - **Sentence Extraction Helper:** `extract_username()` strips fillers like *“my username is … uh …”* and returns a clean username before validation.
-- **UID-Based Record Lookup:** Once verified, the user’s UID is cached so later steps fetch the DB record with `User.query.get(uid)` (immune to username changes).
+- **UID-Based Record Lookup:** Once verified, the user’s UID is cached so later steps fetch the DB record with `User.query.get(uid)` .
 - **Secure Encrypted Recordings:** Decrypts Twilio AES-GCM recordings (RSA-OAEP unwrap of CEK) before transcription.
 - **Dynamic Response Flow:** Uses fuzzy + phonetic matching to handle variations in caller responses.
 - **Large Test Dataset:** `users_info_data.py` seeds > 700 culturally diverse users for realistic testing.
