@@ -4,11 +4,15 @@
 VirtualAssistant is an interactive **voice-based assistant** designed to handle user authentication and troubleshooting via **Twilio IVR (Interactive Voice Response)**. It integrates **OpenAI Whisper** for speech-to-text transcription, processes encrypted call recordings, and interacts with a structured **Flask API**.
 
 ## 🚀 Features
-- **IVR System with Twilio:** Handles voice calls, authentication, and troubleshooting.
+- **IVR System with Twilio:** Handles voice calls, authentication, and troubleshooting flows.
 - **Whisper Speech Recognition:** Converts voice recordings to text for verification.
 - **User Authentication:** Verifies identity using usernames, manager names, and hire dates.
-- **Secure Encrypted Recordings:** Decrypts and processes Twilio call recordings.
-- **Dynamic Response Flow:** Uses fuzzy matching to handle variations in responses.
+- **Soundex Phonetic & Fuzzy Matching:** New phonetic layer (`utils.is_name_match`) catches variations in spoken names (e.g., “Radka Mikolavka” vs. “Radka Mikalavka”).
+- **Sentence Extraction Helper:** `extract_username()` strips fillers like *“my username is … uh …”* and returns a clean username before validation.
+- **UID-Based Record Lookup:** Once verified, the user’s UID is cached so later steps fetch the DB record with `User.query.get(uid)` (immune to username changes).
+- **Secure Encrypted Recordings:** Decrypts Twilio AES-GCM recordings (RSA-OAEP unwrap of CEK) before transcription.
+- **Dynamic Response Flow:** Uses fuzzy + phonetic matching to handle variations in caller responses.
+- **Large Test Dataset:** `users_info_data.py` seeds > 700 culturally diverse users for realistic testing.
 - **Flask API Backend:** Manages requests, authentication, and transcriptions.
 
 ## 📂 Project Structure
@@ -47,8 +51,11 @@ Create a `.env` file and add:
 TWILIO_ACCOUNT_SID=your_twilio_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 ```
+### **5️⃣ Initialize & Populate the Database**
+flask db upgrade            # create tables
+python users_info_data.py   # seed test users
 
-### **5️⃣ Run the Application**
+### **6️⃣ Run the Application**
 ```bash
 flask run
 ```
@@ -64,13 +71,14 @@ Below is the IVR system workflow illustrating the authentication and troubleshoo
 2. **User Calls & Reaches Virtual Assistant:** The IVR system starts troubleshooting using a simple dial pad.
 3. **Troubleshooting & Authentication Requirement:** If the user requires a temporary token, authentication is necessary.
 4. **Verification:**
-   - The system validates the username and manager name.
-   - If additional verification is needed, the hire date is requested.
+   - **Username** → Whisper → extract_username → fuzzy check.
+   - **Manager Name** → Soundex & fuzzy check.
+   - **Hire Date** → Natural-language parsing with ±2-day tolerance.
 5. **Decision Process:**
-   - ✅ If authentication is successful, the user receives a temporary access token.
-   - ❌ If authentication fails, the case is escalated to IT support.
-6. **Logging & Secure Communication:** The call, transcription, and access decisions are logged securely.
-   
+   - ✅ Successful → caller receives a one-time temporary token (voice or Bitwarden).
+   - ❌  Failure → a ServiceNow ticket is opened and the call is routed to IT.
+6. **Logging & Secure Communication:**  All calls, transcriptions, and authentication outcomes are logged securely.
+
 This structured process ensures an automated and secure way to verify users and provide necessary troubleshooting steps.
 
 ## 🔗 API Endpoints
@@ -79,12 +87,16 @@ This structured process ensures an automated and secure way to verify users and 
 | `/ivr/welcome` | `POST` | IVR welcome message |
 | `/ivr/process_username` | `POST` | Processes username input |
 | `/ivr/process_manager` | `POST` | Verifies manager name |
-| `/ivr/recording_status` | `POST` | Handles call recording and transcription |
+| `/ivr/process_hire_date` | `POST` | Confirms hire date |
+| `/ivr/recording_status` | `POST` | Handles encrypted recording → decrypt → Whisper |
+| `/ivr/receive_token` | `POST` | Delivers temporary token; handles repeat/close/ticket |
+
 
 ## 🛡️ Security
-- **Data Encryption:** Ensures sensitive data is encrypted before processing.
-- **Access Control:** Uses Twilio authentication for secure communication.
-- **Error Handling:** Logs and manages unexpected issues gracefully.
+- **AES-256-GCM Decryption:** Twilio media decrypted locally; CEK unwrapped with **RSA-OAEP-SHA-256**.
+- **Bcrypt Password Hashing:** Temporary tokens hashed before DB commit
+- **Access Control:** Twilio request validation + environment token checks.
+- **Robust Error Handling:** Graceful fallback and logging for transcription or DB errors.
 
 
 ## 📜 License
