@@ -12,8 +12,20 @@ Faker==20.1.0
 
 # Twilio integration
 twilio==8.10.0
+requests==2.31.0 
 
-# For Whisper's dependencies, we'll install these first
+# For Whisper's dependencies
+openai-whisper==2025.4.15 
 torch==2.1.0
 numpy==1.24.3
 numba==0.58.1
+librosa==0.10.1                 
+soundfile==0.12.1                
+audioread==3.0.1                 
+
+# Text / fuzzy matching utilities
+thefuzz[speedup]==0.22.1         # fuzzy string matching 
+fuzzywuzzy==0.18.0               # legacy API used in twilio_routes
+python-Levenshtein==0.24.0       # optional C-speedups for thefuzz/fuzzywuzzy
+jellyfish==1.0.4                 # Soundex phonetic comparison
+dateparser==1.2.0   

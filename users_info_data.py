@@ -12,11 +12,24 @@ from app import create_app, db
 from models import User
 from datetime import date, timedelta
 import random
-
+import unicodedata
+import re
 
 
 
 app = create_app()
+
+
+
+def normalize_text(text, is_manager=False):
+    if not text:
+        return text
+    # Convert to ASCII (strip accents like Š → S)
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    if is_manager:
+        text = text.replace('-', ' ')  # Turn hyphen into space
+    text = re.sub(r'[^\w\s]', '', text)  # Remove any other special characters
+    return text.strip()
 
 
 # Custom names for Asian, Middle Eastern, and Peruvian countries
@@ -52,7 +65,7 @@ CUSTOM_NAMES = {
     },
     'Saudi Arabia': {
         'first': ['Mohammed', 'Ahmed', 'Abdullah', 'Ali', 'Hassan', 'Fatima', 'Aisha', 'Omar', 'Ibrahim', 'Nasser'],
-        'last': ['Al-Saud', 'Al-Sheikh', 'Al-Qahtani', 'Al-Ghamdi', 'Al-Rashid', 'Al-Harbi', 'Al-Dossari', 'Al-Shamri', 'Al-Otaibi', 'Al-Zahrani']
+        'last': ['AlSaud', 'AlSheikh', 'AlQahtani', 'AlGhamdi', 'AlRashid', 'AlHarbi', 'AlDossari', 'AlShamri', 'AlOtaibi', 'AlZahrani']
     },
     'Turkey': {
         'first': ['Mehmet', 'Mustafa', 'Ahmet', 'Ayse', 'Fatma', 'Emine', 'Ali', 'Ibrahim', 'Can', 'Eren'],
@@ -60,7 +73,7 @@ CUSTOM_NAMES = {
     },
     'United Arab Emirates': {
         'first': ['Ahmad', 'Mohammed', 'Rashid', 'Fatima', 'Mariam', 'Sultan', 'Saeed', 'Hamad', 'Omar', 'Ali'],
-        'last': ['Al-Maktoum', 'Al-Nahyan', 'Al-Qasimi', 'Al-Mazrouei', 'Al-Shamsi', 'Al-Mansoori', 'Al-Falasi', 'Al-Suwaidi', 'Al-Dhaheri', 'Al-Ali']
+        'last': ['AlMaktoum', 'AlNahyan', 'AlQasimi', 'AlMazrouei', 'AlShamsi', 'AlMansoori', 'AlFalasi', 'AlSuwaidi', 'AlDhaheri', 'AlAli']
     },
     'Qatar': {
         'first': ['Hassan', 'Khalid', 'Mohammed', 'Abdulaziz', 'Noora', 'Maryam', 'Hamad', 'Jassim', 'Abdullah', 'Ali'],
@@ -162,7 +175,8 @@ def create_manager_pool():
     for locale in set(LOCALE_MAPPING.values()):
         faker = Faker(locale)
         for _ in range(1):
-            manager_pool.append(faker.name())
+            manager_pool.append(normalize_text(f"{first} {last}", is_manager=True))
+
     
     return manager_pool
 
@@ -172,52 +186,64 @@ def populate_users():
     """Main function to populate the database"""
     existing_usernames = set()
     manager_pool = create_manager_pool()
-    
 
     with app.app_context():
         # Get existing usernames from database
         existing_db_usernames = set(user.username for user in User.query.all())
         existing_usernames.update(existing_db_usernames)
-        
-        # Handle countries with custom names
+
+        # Handle countries with custom names (no duplicate name pairs)
         for country in CUSTOM_NAMES.keys():
             print(f"Creating users for {country}...")
-            for _ in range(10):  # 10 users per country
+            used_name_pairs = set()
+            while len(used_name_pairs) < 10:
                 first_name, last_name = get_custom_name(country)
-                username = generate_username(first_name, last_name, existing_usernames)
-                user = User(
-                    username=username,
-                    first_name=first_name,
-                    last_name=last_name,
-                    manager=random.choice(manager_pool),
-                    country=country,
-                    hire_date=generate_hire_date()
-                )
-                db.session.add(user)
-                generate_password_hasshed(user)   
-            db.session.commit()
+                name_pair = (first_name, last_name)
+                if name_pair in used_name_pairs:
+                    continue  # Skip duplicate names
+                used_name_pairs.add(name_pair)
 
-        # Handle other countries using Faker
-        for country, locale in LOCALE_MAPPING.items():
-            print(f"Creating users for {country}...")
-            faker = Faker(locale)
-            for _ in range(10):  # 10 users per country
-                first_name = faker.first_name()
-                last_name = faker.last_name()
                 username = generate_username(first_name, last_name, existing_usernames)
                 user = User(
                     username=username,
-                    first_name=first_name,
-                    last_name=last_name,
-                    manager=random.choice(manager_pool),
+                    first_name=normalize_text(first_name),
+                    last_name=normalize_text(last_name),
+                    manager=normalize_text(random.choice(manager_pool), is_manager=True),
                     country=country,
                     hire_date=generate_hire_date()
                 )
                 db.session.add(user)
                 generate_password_hasshed(user)
             db.session.commit()
-        
+
+        # Handle other countries using Faker
+        for country, locale in LOCALE_MAPPING.items():
+            print(f"Creating users for {country}...")
+            faker = Faker(locale)
+            used_name_pairs = set()
+            while len(used_name_pairs) < 10:
+                first_name = faker.first_name()
+                last_name = faker.last_name()
+                name_pair = (first_name, last_name)
+                if name_pair in used_name_pairs:
+                    continue
+                used_name_pairs.add(name_pair)
+
+                username = generate_username(first_name, last_name, existing_usernames)
+                user = User(
+                    username=username,
+                    first_name=normalize_text(first_name),
+                    last_name=normalize_text(last_name),
+                    manager=normalize_text(random.choice(manager_pool), is_manager=True),
+                    country=country,
+                    hire_date=generate_hire_date()
+                )
+                db.session.add(user)
+                generate_password_hasshed(user)
+            db.session.commit()
+
         print("Database populated successfully!")
+
 
 
 

@@ -22,19 +22,20 @@ transcription, and verification.
 import json
 from twilio.twiml.voice_response import VoiceResponse
 from flask import request, redirect, Response, jsonify
+from models import User
 import requests
 from environment_variables import account_sid, auth_token
 from decryption_utils import decrypt_recording
-from whisper_transcription import transcribe_audio_content, clean_username, clean_manager_name
-from utils import linfo, generate_password_hasshed
-import os
+from whisper_transcription import transcribe_audio_content
+from utils import linfo, generate_password_hasshed, get_usernames_by_country, clean_name, is_name_match, normalize_date_string, extract_username
 from fuzzywuzzy import fuzz
+from datetime import datetime
 
 # Documentation URL for reference
 DOC_URL = "https://docs.google.com/document/d/1d0pHqhfGcqEXIxVyAEIRGTWtFgOR3oUG7Ejx8Y3lrHw/edit?tab=t.j2t51v7h3lin"
 
 # Global Variables
-transcription_storage = {} # Store verification info by call_sid
+transcription_storage = {} # Store transcription by call_sid
 verification_storage = {}  # Store verification info by call_sid
 
 
@@ -52,18 +53,40 @@ def verify_user(username):
 
     user_info = linfo(username)
 
-    if not user_info:
-        print(f"Verification failed: No user found for username '{username}'.")
+    if user_info:
+        print(f"Verification successful for username: {username}")
+        print(f"Retrieved User Info: {user_info}")
+
+        return {
+            'status': 'success',
+            'username': username,
+            'user_info': user_info
+        }
+    else:
+        country = request.values.get("FromCountry")
+        print(f"calling from: {country}")
+        username_list = get_usernames_by_country(country)
+        print(f"username list: {username_list}")
+
+        best_ratio = 0
+        best_match = None
+
+        for user in username_list:
+            ratio = fuzz.ratio(username, user) 
+            print(f"{username} vs {user} is: {ratio}")
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_match = user
+                print( f" current best match is: {best_match}")
+        print(f"Best fuzzy match: {best_match} with score: {best_ratio}")
+        if best_ratio >= 85:
+            user_info = linfo(best_match)
+            return {
+                'status': 'success',
+                'username': best_match,
+                'user_info': user_info
+            }
         return {'status': 'fail'}
-
-    print(f"Verification successful for username: {username}")
-    print(f"Retrieved User Info: {user_info}")
-
-    return {
-        'status': 'success',
-        'username': username,
-        'user_info': user_info
-    }
     
 def verify_manager(user_answer, user_info):
     """Verifies if the manager's name matches the stored manager in the database.
@@ -73,35 +96,50 @@ def verify_manager(user_answer, user_info):
     - If the similarity score is 90 or above, the verification is considered successful.
     """
     print("\n=== Process manager verification ===")
-    name_in_ldap = user_info['manager']
+    name_in_ldap = user_info['manager'].lower()
     print(f"manager's name  received for verification: {user_answer}")
     print(f"manager's name  in LDAP: {name_in_ldap}")
 
+    
+
     if user_answer != name_in_ldap:
         print("\n Transcription failed, start fuzzy matching ")
-        similarity = fuzz.ratio(user_answer, name_in_ldap)
-        if similarity >= 90:
+
+        if is_name_match(user_answer, name_in_ldap):
             print(f"Verification successful for : {user_answer}")
-            return {'status': 'success'}
+            return {'status': 'success'}    
         else:
             print(f"Verification failed: {user_answer} was not found in LDAP.")
-            return {'status': 'fail'}
-    
+            return {'status': 'fail'}     
     print(f"Verification successful for : {user_answer}")
     return {'status': 'success'}
 
     
 def verify_hire_date(user_answer, user_info):
-    print("\n=== Process manageruser's hire date verification ===")
+    print("\n=== Process user's hire date verification ===")
     hire_date_in_ldap = user_info['hire_date']
-    print(f"hire date received for verification: {user_answer}")
-    print(f"hire date in LDAP: {hire_date_in_ldap}")
+    print(f"Hire date received for verification: {user_answer}")
+    print(f"Hire date in LDAP: {hire_date_in_ldap}")
 
-    if user_answer != hire_date_in_ldap:
-        print(f"Verification failed: {user_answer} was not found in LDAP.")
+    parsed_date_str = normalize_date_string(user_answer)
+    print(f"Parsed date from user input: {parsed_date_str}")
+
+    if not parsed_date_str:
+        print("Date parsing failed.")
         return {'status': 'fail'}
-    print(f"Verification successful for : {user_answer}")
-    return {'status': 'success'}
+
+    # Convert both to date objects
+    parsed_date = datetime.strptime(parsed_date_str, "%Y-%m-%d").date()
+    actual_date = datetime.strptime(hire_date_in_ldap, "%Y-%m-%d").date()
+
+    # Allow ±2 days differences
+    delta = abs((parsed_date - actual_date).days)
+    if delta <= 2:
+        print(f"Verification successful (delta {delta} days): {parsed_date_str}")
+        return {'status': 'success'}
+    else:
+        print(f"Verification failed: {parsed_date_str} differs by {delta} days from LDAP.")
+        return {'status': 'fail'}
 
 
 outage = False
@@ -133,16 +171,23 @@ def register_twilio_routes(app):
     def welcome():
         """Provides an initial welcome message and instructions for troubleshooting."""
         response = VoiceResponse()
-        with response.gather(num_digits=1, action='/welcome_menu', timeout=3, trimming="trim_silence", method="POST") as g:
-            g.say("Welcome to the SSO Troubleshooting Voice Assistant." +
-                "Before we begin resolving the issue, here's a quick reminder:" +
-                "Kerberos Password: " +
-                "It is at least 14 characters long and is the password you use when logging into your desktop for the first time after opening your laptop." +
-                "PIN + Token: A 6-digit PIN combined with a one-time password generated by your OTP app." +
-                "For logging into your desktop, please enter your Kerberos password."+
-                " For logging into Red Hat applications (like your Red Hat email account or Rover), please enter your PIN + token.", loop=3)
-            response.pause(length=2)
-            g.say("If this resolves your issue, press 0. If not, press 1 to continue.", loop=3)
+        with response.gather(num_digits=1, action='/ivr/welcome_menu', timeout=3, trimming="trim_silence", method="POST") as g:
+           # g.say("Welcome to the SSO Troubleshooting Voice Assistant.")
+           # g.pause(length=1)
+           # g.say("Before we begin resolving the issue, here's a quick reminder:")
+           # g.pause(length=1)
+           # g.say("Kerberos Password: " +
+            #    "It is at least 14 characters long and is the password you use when logging into your desktop for the first time after opening your laptop")
+            #g.pause(length=1)    
+            #g.say("PIN + Token: A 6-digit PIN combined with a one-time password generated by your OTP app")
+            #g.pause(length=1)  
+            #g.say("For logging into your desktop, please enter your Kerberos password")
+            #g.pause(length=1)
+            #g.say(" For logging into Red Hat applications (like your Red Hat email account or Rover), please enter your PIN + token")
+            #g.pause(length=1)
+            g.say("If this resolves your issue, press 0")
+            g.pause(length=1)
+            g.say("If not, press 1 to continue")
             
 
         return twiml(response)
@@ -151,13 +196,14 @@ def register_twilio_routes(app):
     def welcome_menu():
         """Handles menu selection from the welcome message."""
         selected_option = request.form.get('Digits')
+        print(f"selected option: {selected_option}")
         response = VoiceResponse() #Create response object
 
         if core_ivr_responses(selected_option, response):
             return twiml(response)
     
         option_action = {"0": end_call,
-                        "1": continue_ts}
+                         "1": continue_ts}
         if selected_option in option_action.keys():          
             option_action[selected_option](response) #use the response object
         else:
@@ -169,9 +215,10 @@ def register_twilio_routes(app):
     @app.route('/ivr/main_menu', methods=['POST'])
     def main_menu():
         selected_option = request.form.get('Digits')
+        print(f"selected option: {selected_option}")
         response = VoiceResponse()
         option_actions = {"1": out_of_sync,
-                          "2": otp_app_issue}
+                          "4": otp_app_issue}
         if selected_option in option_actions.keys(): 
             option_actions[selected_option](response)
         else:
@@ -182,6 +229,7 @@ def register_twilio_routes(app):
     @app.route("/ivr/sync_menu", methods=['POST'])
     def sync_menu():
         selected_option = request.form.get('Digits')
+        print(f"selected option: {selected_option}")
         response = VoiceResponse()
 
         if core_ivr_responses(selected_option, response, resync_token):
@@ -201,6 +249,7 @@ def register_twilio_routes(app):
     @app.route("/ivr/vpn_access_menu", methods=["POST"])
     def vpn_access_menu():
         selected_option = request.form.get('Digits')
+        print(f"selected option: {selected_option}")
         response = VoiceResponse()
 
         if selected_option:
@@ -225,7 +274,7 @@ def register_twilio_routes(app):
         global transcription_storage
 
         print("\n=== Recording Status Called ===")
-        print("Full request:", dict(request.values))
+       # print("Full request:", dict(request.values))
 
         recording_sid = request.values.get('RecordingSid')
         recording_status = request.values.get('RecordingStatus')
@@ -233,10 +282,10 @@ def register_twilio_routes(app):
         encryption_details = request.values.get('EncryptionDetails')
         call_sid = request.values.get('CallSid')
 
-        print(f"Recording Status: {recording_status}")
-        print(f"Recording SID: {recording_sid}")
-        print(f"Call SID: {call_sid}")
-        print(f"Recording URL: {recording_url}")
+        #print(f"Recording Status: {recording_status}")
+        #print(f"Recording SID: {recording_sid}")
+        #print(f"Call SID: {call_sid}")
+        #print(f"Recording URL: {recording_url}")
 
         if not recording_status:
             print("No recording status received")
@@ -342,8 +391,9 @@ def register_twilio_routes(app):
         
         # Get transcription and verify user
         transcribed_text = transcription_storage.get(call_sid)
-        cleaned_username = clean_username(transcribed_text)
-        print(cleaned_username)
+        extracted_username = extract_username(transcribed_text)
+        cleaned_username = clean_name(extracted_username)
+        print(f"cleaned username is: {cleaned_username}")
         if cleaned_username:
             result = verify_user(cleaned_username)
             if result['status'] == 'success':
@@ -367,6 +417,7 @@ def register_twilio_routes(app):
                 response.say("Username not found. Please try spelling it out.")
                 temporary_token(response)
         else:
+            response.say("Thank you. Please hold while I process your answer.")
             # Add small delay and redirect once
             response.pause(length=10)
             response.redirect('/ivr/process_username')
@@ -388,25 +439,41 @@ def register_twilio_routes(app):
         transcribed_text = transcription_storage.get(call_sid)
         print(f"Retrieved transcription: {transcribed_text}")  
 
-        cleaned_manager_name = clean_manager_name(transcribed_text)
+        cleaned_manager_name = clean_name(transcribed_text, remove_spaces=False)
 
         if cleaned_manager_name:
             result = verify_manager(cleaned_manager_name, user_data['user_info'])
             if result['status'] == 'success':
-                response.gather(num_digits=1, action='/receive_token', timeout=3, trimming="trim_silence", method="POST")
-                response.say("That is correct." + 
-                            "To receive a temporary token via a 'Bitwarden' link, which can only be clicked once, sent to your private email account, please press 1" + 
-                            "To receive the temporary token immediately, by voice press 2." + 
-                            "to here your option again press 3") 
+                print("Manager verification successful.")
+                with response.gather(num_digits=1, action='/ivr/receive_token', timeout=10, trimming="trim_silence", method="POST") as g:
+                    g.say("That is correct")
+                    g.pause(length=1)
+                    #g.say("To receive a temporary token via a 'Bitwarden' link, which can only be viewed once " + 
+                    #   ", sent to your private email account, please press 1 ")
+                    g.pause(length=1)
+                    g.say("To receive the temporary token immediately, by voice, press 4")
+                    g.pause(length=1)
+                    g.say("To hear your options again, press 3")
+
+                return twiml(response) 
             else:
-                response.say(f"I'm sorry, that is incorrect. Please tell me your hiring date.")
+                print("Manager verification failed. Asking for hire date.")
+                response.say("I'm sorry, that is incorrect. Let's try one more step.")
+                response.pause(length= 1)
+                response.say("Please say your hiring date clearly. For example: February 1st, 2022. Then press '#' when finished.")
                 response.record(
                     action='/ivr/process_hire_date',  
                     finishOnKey='#',
-                    recordingStatusCallback='ivr/recording_status',  
-                    recordingStatusCallbackEvent=['completed', 'failed', 'in-progress']
+                    recordingStatusCallback='/ivr/recording_status',  
+                    recordingStatusCallbackEvent='completed',
+                    timeout=10,
+                    playBeep=True,
+                    trim='trim-silence'
                 )
+                transcription_storage.pop(call_sid, None)   
+                return twiml(response)
         else:
+            response.say("Please hold while I process your answer.")
             # Add small delay and redirect once
             response.pause(length=10)
             response.redirect('/ivr/process_manager')
@@ -423,29 +490,34 @@ def register_twilio_routes(app):
         print("\n=== Process hire date ===")
         print(f"Call SID from request: {call_sid}")
         print(f"Verification Storage: {verification_storage}")
-    
-        # Get transcription using same CallSid
+
         transcribed_text = transcription_storage.get(call_sid)
-        print(f"Retrieved transcription: {transcribed_text}") 
+        print(f"Retrieved transcription: {transcribed_text}")
+
         if transcribed_text:
             result = verify_hire_date(transcribed_text, user_data['user_info'])
 
             if result['status'] == 'success':
-                response.gather(num_digits=1, action='/receive_token', timeout=3, trimming="trim_silence", method="POST")
-                response.say("That is correct." + 
-                            "To receive a temporary token via a 'Bitwarden' link, which can only be clicked once, sent to your private email account, please press 1" + 
-                            "To receive the temporary token immediately, by voice press 2." 
-                            ) 
+                with response.gather(num_digits=1, action='/receive_token', timeout=3, trimming="trim_silence", method="POST") as g:
+                    g.say("That is correct")
+                    g.pause(length=1)
+                    g.say("To receive a temporary token via a 'Bitwarden' link, which can only be clicked once, sent to your private email account, please press 1")
+                    g.pause(length=1)
+                    g.say("To receive the temporary token immediately, by voice, press 4") 
+                    g.pause(length=1)
+                    g.say("To hear your options again, press 3.")  
+                return twiml(response)                
             else:
-                response.say("That is incorrect. Authentication failed, a ticket have been opened and an IT agent will contact you in the next 20 minuets")
-                open_ticket()
+                response.say("That is incorrect. Authentication failed. A ticket has been opened and an IT agent will contact you in the next 20 minutes.")
+                open_ticket(response)
+                transcription_storage.pop(call_sid, None) 
+                return twiml(response) 
         else:
-            # Add small delay and redirect once
+            response.say("Thank you. Please hold while I process your answer.")
+            print("Transcription not ready yet. Pausing and retrying...")
             response.pause(length=10)
             response.redirect('/ivr/process_hire_date')
-
-        transcription_storage.pop(call_sid, None)
-        return twiml(response)        
+            return twiml(response)     
         
 
     @app.route('/ivr/receive_token', methods=['POST'])
@@ -457,7 +529,7 @@ def register_twilio_routes(app):
             return twiml(response)
     
         option_action = {"1": temptoken_bitwarden,
-                        "2": say_temptoken                      
+                         "4": say_temptoken                      
                         }
         if selected_option in option_action.keys():          
             option_action[selected_option](response) 
@@ -509,9 +581,12 @@ def repeat_steps(response, menu_function):
 
 def continue_ts(response):
     with response.gather(num_digits=1, action='/ivr/main_menu', timeout=3, trimming="trim_silence", method="POST") as g:
-        g.say("If you haven't logged in for over 4 days, and your usual token isn't working" +
-              " it might be out of sync. to resunc it please Press 2."+
-              "If you've gotten a new phone, reinstalled your OTP app, or don't have access to your Kerberos password, press 4.")
+        g.say("If you haven't logged in to your redhat account for over 4 days, and your usual token isn't working," +
+              " it might be out of sync.")
+        g.pause(length=1)
+        g.say("to resync it please Press 2.")
+        g.pause(length=2)
+        g.say("If you've gotten a new phone, or reinstalled your OTP app, or don't have access to your Kerberos password, press 4.")
     return response
 
 # main_menu methods
@@ -520,7 +595,7 @@ def out_of_sync(response):
         g.say("Lets resync your token!" +
               "from your browser, navigate to token.redhat.com." +
               "Log in using your Red Hat username and Kerberos password. ")
-        response.pause(length=5)
+        g.pause(length=5)
         g.say("If you've successfully logged into token.redhat.com website, press 4 to proceed with the token resync." +
               "if you'd like to get this instruction sent to this phone number, press 5" +
               "If you've forgotten your Kerberos password and are unable to log in to token.redhat.com," +
@@ -540,10 +615,10 @@ def resync_token(response):
               " Enter the generated token in the field labeled Enter first OTP value." + 
               " Press the button again and enter the next code in the Enter second OTP value field." + 
               " Click Resync Token.")
-        response.pause(length=5)
+        g.pause(length=5)
         g.say("If resyncing the token does not resolve the issue," +
               " try setting the PIN using the option beneath Resync Token at token.redhat.com.")
-        response.pause(length=3)
+        g.pause(length=3)
         g.say(" If this resolves your issue, press 0." +
               " To repeat the steps, press 1." + 
               " For assistance from a live IT agent and to open a support ticket, press 3.")
@@ -551,11 +626,12 @@ def resync_token(response):
  
         
 def otp_app_issue(response):
-    with response.gather(num_digits=1, action='/ivr/vpn_access_menu', timeout=3, trimming="trim_silence", method="POST") as g:
-        g.say("If you've got a new phone, you cannot transfer your existing token to it." + 
-              " If you still have access to your old phone and the VPN, press 4." + 
-              " If you're locked out of the VPN and no longer have access to your current token, press 9  to receive a temporary token." + 
-              " To repeat the steps, press 1.")
+    with response.gather(num_digits=1, action='/ivr/vpn_access_menu', timeout=5, trimming="trim_silence", method="POST") as g:
+        g.say("If you've got a new phone, but still have access to your old phone and the VPN, press 4." )
+        g.pause(length=1)
+        g.say( " If you're locked out of the VPN and no longer have access to your current token, press 9, to receive a temporary token.")
+        g.pause(length=1)
+        g.say("To repeat the steps, press 1.")
     return response
 
 
@@ -567,16 +643,17 @@ def send_kb(response):
 def login_steps(response):
         with response.gather(num_digits=1, action='/ivr/vpn_access_menu', timeout=5, trimming="trim_silence", method="POST") as g:
             g.say("Please connect to the VPN using your PIN + Token (using your old phone).")
-            response.pause(length=5)
+            g.pause(length=2)
             g.say("To set up a new PIN + Token, go to help.redhat.com and search for: 'Set up a FreeOTP Soft Token at token.redhat.com.' Follow the guide to set up a new PIN + Token. ")
-            response.pause(length=3)
-            g.say("If this resolves your issue, press 0." + 
-                  " To repeat the steps press 3 " + 
-                  " For assistance from a live IT agent, please open a ticket at redhat.help.com.")
+            g.pause(length=1)
+            g.say("If this resolves your issue, press 0.") 
+            g.pause(length=1)
+            g.say(" To repeat the steps press 3 ")
+            g.pause(length=1)
+            g.say("For assistance from a live IT agent, please open a ticket at redhat.help.com.")
         return response
 
 def temporary_token(response):
-    
     
     response.say("please provide your username and press # when finish.")
     response.record(
@@ -596,30 +673,43 @@ def temporary_token(response):
 def temptoken_bitwarden():
     pass
 
-def say_temptoken(respons):
-    call_sid = request.value.get('CallSid')
+def say_temptoken(response):
+    print("\n=== say_temptoken called ===")
+    call_sid = request.values.get('CallSid')
     user_data = verification_storage.get(call_sid)
-    username = user_data['username']
+
+    if not user_data:
+        response.say("We couldn't verify your session. Please try again.")
+        return twiml(response)
+
     
+    uid = User.query.get(user_data['user_info']["uid"])
+    print(f"start generating temporary token for {uid}")
+
+
+    # Generate token if not present
     if 'temp_token' not in verification_storage[call_sid]:
-        temp_token = generate_password_hasshed(username)
+        temp_token = generate_password_hasshed(uid)
+        print(f"temporary token is: {temp_token}")
         verification_storage[call_sid]['temp_token'] = temp_token
     else:
-        new_temporary_token = generate_password_hasshed(username)
+        temp_token = verification_storage[call_sid]['temp_token']
 
-        respons.say("Your temporary token is:")
-        respons.pause(length=2)
+    response.say("Please write down your temporary token. It will be read slowly.")
+    response.pause(length=2)
 
-    for char in new_temporary_token:
-        respons.say(char)
-        respons.paue(length=1)
-    
-    with respons.gather(num_digits=1, action='/ivr/receive_token', timeout=60, trimming="trim_silence", method="POST") as g:
-        g.say("This temporary token valid for 3 hours." +
-              "If you managed to login using this temporary token press 0."+
-              "To hear the token again press 3.") 
-    return respons
+    for char in temp_token:
+        response.say(char)
+        response.pause(length=1.5)  # slower pace for clarity
 
+    with response.gather(num_digits=1, action='/ivr/receive_token', timeout=10, trimming="trim_silence", method="POST") as g:
+        g.say("This temporary token is valid for 3 hours.")
+        g.pause(length=1)
+        g.say("If you managed to log in using this token, press 0.")
+        g.pause(length=1)
+        g.say("To hear the token again, press 3.")
+        g.pause(length=1)
+        g.say("To speak to an IT agent, press 2.")
 
-
+    return twiml(response)
 

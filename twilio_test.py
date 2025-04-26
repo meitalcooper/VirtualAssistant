@@ -21,7 +21,7 @@ try:
     call = client.calls.create(
         to="{YOUR_NUMBER}",
         from_="+16205091768",
-        url="https://4243-89-138-72-52.ngrok-free.app/ivr/vpn_access_menu"
+        url="https://2031-2a06-c701-912d-c000-4081-ee04-4e74-6805.ngrok-free.app/ivr/welcome"
     )
     print(f"Call initiated with SID: {call.sid}")
     

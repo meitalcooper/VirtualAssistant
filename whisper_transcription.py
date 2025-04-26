@@ -20,7 +20,10 @@ import io
 import librosa
 import whisper
 import logging
-import re
+
+
+
+
 
 model = whisper.load_model("turbo")
 
@@ -28,15 +31,15 @@ def transcribe_audio_content(audio_content):
     """Process decrypted audio content with Whisper"""
     try:
         print("\n=== Starting Whisper Transcription ===")
-        print(f"Audio content length: {len(audio_content)} bytes")
+        #print(f"Audio content length: {len(audio_content)} bytes")
         
         # Convert audio bytes to format Whisper expects
         audio_data = io.BytesIO(audio_content)
         
-        print("Loading audio with librosa...")
+        #print("Loading audio with librosa...")
         logging.getLogger('numba').setLevel(logging.WARNING)
         samples, sr = librosa.load(audio_data, sr=16000)
-        print(f"Loaded audio: {len(samples)} samples at {sr}Hz")
+        #print(f"Loaded audio: {len(samples)} samples at {sr}Hz")
         
         if len(samples) == 0:
             print("Warning: Empty audio samples")
@@ -61,18 +64,6 @@ def transcribe_audio_content(audio_content):
         print(f"Full error details: {str(e)}")
         return None
 
-def clean_username(name):
-    # Remove spaces, hyphens and periods
-    if name:
-        cleaned_name = re.sub(r'[ .-]', '', name)
-        # Convert to lowercase
-        cleaned_name = cleaned_name.lower()
-        return cleaned_name
-    return None
 
-def clean_manager_name(name):
-    # Remove periods and hyphens
-    if name:
-        cleaned_manager_name = re.sub(r'[.-]', '', name)
-        return cleaned_manager_name
-    return None
+
+
