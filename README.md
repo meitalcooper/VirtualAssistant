@@ -92,7 +92,7 @@ We have successfully tested the full authentication flow with diverse cultural d
   3. [cite_start]**Verification:** Matches the inputs against the database (fuzzy match: `alevin` ≈ `Moshe Levin`)[cite: 43, 44].
   4. [cite_start]**Success:** Retrieves user info and prepares the temporary token[cite: 45].
 
-  ![Test Execution Logs](test-execution.png)
+  ![Test Execution Logs](test-execution.jpg)
 
 </details>
 
