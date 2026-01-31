@@ -80,17 +80,17 @@ Below is the IVR system workflow illustrating the authentication and troubleshoo
 6. **Logging & Secure Communication:**  All calls, transcriptions, and authentication outcomes are logged securely.
 
 ## 🧪 Example Test Case
-We have successfully tested the full authentication flow with diverse cultural datasets. [cite_start]The specific test case below demonstrates the system verifying user **Moshe Levin** (UID: 57)[cite: 45].
+We have successfully tested the full authentication flow with diverse cultural datasets. The specific test case below demonstrates the system verifying user **Moshe Levin** (UID: 57).
 
 <details>
   <summary><strong>🔍 Click to expand: View a successful execution log</strong></summary>
 
   ### Test Scenario: Full Voice Authentication
   In this run, the system performs the following real-time operations:
-  1. [cite_start]**Secure Decryption:** Decrypts the raw Twilio audio recording (`Starting Decryption Process`)[cite: 28].
-  2. [cite_start]**Transcription:** Uses Whisper to transcribe the spoken username *"alevin"* and manager *"Michelle Cannon"*[cite: 35, 58].
-  3. [cite_start]**Verification:** Matches the inputs against the database (fuzzy match: `alevin` ≈ `Moshe Levin`)[cite: 43, 44].
-  4. [cite_start]**Success:** Retrieves user info and prepares the temporary token[cite: 45].
+  1. **Secure Decryption:** Decrypts the raw Twilio audio recording (`Starting Decryption Process`).
+  2. **Transcription:** Uses Whisper to transcribe the spoken username *"alevin"* and manager *"Michelle Cannon"*.
+  3. **Verification:** Matches the inputs against the database (fuzzy match: `alevin` ≈ `Moshe Levin`).
+  4. **Success:** Retrieves user info and prepares the temporary token.
 
   ![Test Execution Logs](test-execution.jpg)
 
